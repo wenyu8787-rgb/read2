@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="zh-TW">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>閱讀打卡牆</title>
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      height: 100%;
+      width: 100%;
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+    }
+    .float-animation {
+      animation: float 3s ease-in-out infinite;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in {
+      animation: fadeIn 0.5s ease-out;
+    }
+    .card-gradient {
+      background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%);
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+ </head>
+ <body class="w-full min-h-full">
+  <div id="app" class="w-full min-h-full"></div>
+  <script>
+    const defaultConfig = {
+      background_color: '#6366f1',
+      card_color: '#ffffff',
+      text_color: '#1e293b',
+      primary_button_color: '#f59e0b',
+      accent_color: '#ec4899',
+      font_family: 'system-ui',
+      font_size: 16,
+      wall_title: '✨ 閱讀打卡牆 ✨',
+      subtitle_text: '分享閱讀，快樂成長 📖',
+      button_text: '📝 我要打卡',
+      class_label: '班級名稱',
+      name_label: '姓名',
+      book_label: '書名',
+      pages_label: '閱讀頁數',
+      reflection_label: '閱讀心得',
+      mood_label: '我的心情',
+      admin_password: 'admin999'
+    };
+
+    let config = { ...defaultConfig };
+    let records = [];
+    let isLoading = false;
+    let isAdminMode = false;
+    let globalLikesEnabled = true;
+    let globalCommentsEnabled = true;
+    let currentPage = 1;
+    const recordsPerPage = 9;
+
+    const moods = [
+      { emoji: '😊', label: '開心' },
+      { emoji: '😍', label: '喜愛' },
+      { emoji: '🤔', label: '思考' },
+      { emoji: '😢', label: '感動' },
+      { emoji: '😮', label: '驚訝' },
+      { emoji: '😌', label: '平靜' }
+    ];
+
+    function render() {
+      const app = document.getElementById('app');
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseSize = config.font_size || defaultConfig.font_size;
+
+      app.style.background = `linear-gradient(135deg, ${config.background_color || defaultConfig.background_color} 0%, ${adjustColor(config.background_color || defaultConfig.background_color, -20)} 100%)`;
+      app.style.fontFamily = `${customFont}, system-ui, -apple-system, sans-serif`;
+      app.style.color = config.text_color || defaultConfig.text_color;
+
+      app.innerHTML = `
+        <div class="w-full min-h-full p-6">
+          <div class="max-w-7xl mx-auto">
+            <header class="text-center mb-8 fade-in">
+              <div class="inline-block p-8 rounded-3xl mb-4" style="background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(10px);">
+                <h1 id="main-title" class="font-bold mb-2 float-animation" style="font-size: ${baseSize * 2.5}px; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">${config.wall_title || defaultConfig.wall_title}</h1>
+                <p class="font-medium" style="font-size: ${baseSize * 1.1}px; color: rgba(255, 255, 255, 0.95);">${config.subtitle_text || defaultConfig.subtitle_text}</p>
+              </div>
+              
+              <div class="flex justify-center items-center gap-3 flex-wrap mt-6">
+                <button id="add-button" class="px-8 py-4 rounded-2xl font-bold transition-all hover:scale-105 hover:shadow-2xl shadow-lg" style="font-size: ${baseSize * 1.1}px; background: linear-gradient(135deg, ${config.primary_button_color || defaultConfig.primary_button_color} 0%, ${adjustColor(config.primary_button_color || defaultConfig.primary_button_color, -20)} 100%); color: white;">
+                  ${config.button_text || defaultConfig.button_text}
+                </button>
+                <button id="admin-toggle" class="px-6 py-3 rounded-2xl font-bold transition-all hover:scale-105 shadow-lg" style="font-size: ${baseSize * 0.95}px; background: rgba(255, 255, 255, 0.95); color: ${config.background_color || defaultConfig.background_color}; border: 3px solid white;">
+                  ${isAdminMode ? '👤 離開管理' : '🔑 管理者'}
+                </button>
+              </div>
+
+              ${isAdminMode ? `
+              <div class="mt-6 inline-block p-6 rounded-2xl" style="background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px);">
+                <h3 class="font-bold mb-4" style="font-size: ${baseSize * 1.2}px; color: white;">⚙️ 全域功能設定</h3>
+                <div class="flex gap-6 justify-center">
+                  <label class="flex items-center gap-2 cursor-pointer px-4 py-2 rounded-xl transition-all hover:scale-105" style="background: rgba(255, 255, 255, 0.9);">
+                    <input type="checkbox" id="global-likes-toggle" ${globalLikesEnabled ? 'checked' : ''} class="w-5 h-5">
+                    <span class="font-medium" style="font-size: ${baseSize}px; color: ${config.text_color || defaultConfig.text_color};">❤️ 允許按讚</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer px-4 py-2 rounded-xl transition-all hover:scale-105" style="background: rgba(255, 255, 255, 0.9);">
+                    <input type="checkbox" id="global-comments-toggle" ${globalCommentsEnabled ? 'checked' : ''} class="w-5 h-5">
+                    <span class="font-medium" style="font-size: ${baseSize}px; color: ${config.text_color || defaultConfig.text_color};">💬 允許留言</span>
+                  </label>
+                </div>
+              </div>
+              ` : ''}
+            </header>
+
+            <div id="form-container" class="hidden mb-8 fade-in">
+              <div class="max-w-2xl mx-auto p-8 rounded-3xl shadow-2xl card-gradient" style="border: 3px solid ${config.accent_color || defaultConfig.accent_color};">
+                <h2 class="font-bold mb-6 text-center" style="font-size: ${baseSize * 1.8}px; color: ${config.primary_button_color || defaultConfig.primary_button_color};">📝 新增閱讀打卡</h2>
+                <form id="reading-form" class="space-y-5">
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label for="class-name" class="block mb-2 font-bold" style="font-size: ${baseSize * 0.95}px; color: ${config.accent_color || defaultConfig.accent_color};">📍 ${config.class_label || defaultConfig.class_label}</label>
+                      <input type="text" id="class-name" required class="w-full px-4 py-3 border-2 rounded-xl transition-all focus:scale-105" style="font-size: ${baseSize}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+                    </div>
+                    <div>
+                      <label for="student-name" class="block mb-2 font-bold" style="font-size: ${baseSize * 0.95}px; color: ${config.accent_color || defaultConfig.accent_color};">👤 ${config.name_label || defaultConfig.name_label}</label>
+                      <input type="text" id="student-name" required class="w-full px-4 py-3 border-2 rounded-xl transition-all focus:scale-105" style="font-size: ${baseSize}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+                    </div>
+                  </div>
+                  <div>
+                    <label for="book-title" class="block mb-2 font-bold" style="font-size: ${baseSize * 0.95}px; color: ${config.accent_color || defaultConfig.accent_color};">📚 ${config.book_label || defaultConfig.book_label}</label>
+                    <input type="text" id="book-title" required class="w-full px-4 py-3 border-2 rounded-xl transition-all focus:scale-105" style="font-size: ${baseSize}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+                  </div>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label for="start-page" class="block mb-2 font-bold" style="font-size: ${baseSize * 0.95}px; color: ${config.accent_color || defaultConfig.accent_color};">📖 從第幾頁</label>
+                      <input type="number" id="start-page" required min="1" class="w-full px-4 py-3 border-2 rounded-xl transition-all focus:scale-105" style="font-size: ${baseSize}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+                    </div>
+                    <div>
+                      <label for="end-page" class="block mb-2 font-bold" style="font-size: ${baseSize * 0.95}px; color: ${config.accent_color || defaultConfig.accent_color};">📄 到第幾頁</label>
+                      <input type="number" id="end-page" required min="1" class="w-full px-4 py-3 border-2 rounded-xl transition-all focus:scale-105" style="font-size: ${baseSize}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+                    </div>
+                  </div>
+                  <div>
+                    <label for="reflection" class="block mb-2 font-bold" style="font-size: ${baseSize * 0.95}px; color: ${config.accent_color || defaultConfig.accent_color};">💭 ${config.reflection_label || defaultConfig.reflection_label}</label>
+                    <textarea id="reflection" required rows="4" class="w-full px-4 py-3 border-2 rounded-xl resize-none transition-all focus:scale-105" style="font-size: ${baseSize}px; border-color: ${config.accent_color || defaultConfig.accent_color};"></textarea>
+                  </div>
+                  <div>
+                    <label class="block mb-3 font-bold" style="font-size: ${baseSize * 0.95}px; color: ${config.accent_color || defaultConfig.accent_color};">🎭 ${config.mood_label || defaultConfig.mood_label}</label>
+                    <div id="mood-selector" class="flex flex-wrap gap-3"></div>
+                  </div>
+                  <div class="flex gap-3 pt-4">
+                    <button type="submit" id="submit-button" class="flex-1 px-6 py-4 rounded-xl font-bold transition-all hover:scale-105 shadow-lg" style="font-size: ${baseSize * 1.1}px; background: linear-gradient(135deg, ${config.primary_button_color || defaultConfig.primary_button_color} 0%, ${adjustColor(config.primary_button_color || defaultConfig.primary_button_color, -20)} 100%); color: white;">
+                      🚀 送出打卡
+                    </button>
+                    <button type="button" id="cancel-button" class="flex-1 px-6 py-4 rounded-xl font-bold border-2 transition-all hover:scale-105" style="font-size: ${baseSize * 1.1}px; border-color: ${config.text_color || defaultConfig.text_color}33; color: ${config.text_color || defaultConfig.text_color};">
+                      ❌ 取消
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <div id="records-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+            
+            <div id="pagination-container" class="mt-8 flex justify-center items-center gap-3 ${records.length <= recordsPerPage ? 'hidden' : ''}"></div>
+            
+            <div id="empty-state" class="text-center py-12 ${records.length > 0 ? 'hidden' : ''}">
+              <div class="inline-block p-8 rounded-3xl" style="background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px);">
+                <div class="text-8xl mb-4 float-animation">📚</div>
+                <p class="font-bold" style="font-size: ${baseSize * 1.5}px; color: white; text-shadow: 1px 1px 2px rgba(0,0,0,0.2);">
+                  還沒有任何打卡記錄<br>快來分享你的閱讀心得吧！✨
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      renderMoodSelector();
+      renderRecords();
+      attachEventListeners();
+    }
+
+    function adjustColor(color, amount) {
+      const num = parseInt(color.replace('#', ''), 16);
+      const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+      const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amount));
+      const b = Math.max(0, Math.min(255, (num & 0x0000FF) + amount));
+      return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+    }
+
+    function renderMoodSelector() {
+      const moodSelector = document.getElementById('mood-selector');
+      if (!moodSelector) return;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      
+      moodSelector.innerHTML = moods.map(mood => `
+        <button type="button" class="mood-option flex flex-col items-center p-4 rounded-2xl border-3 transition-all hover:scale-110 shadow-md" style="font-size: ${baseSize * 0.9}px; border: 3px solid ${config.text_color || defaultConfig.text_color}22; background: white;" data-mood="${mood.emoji}">
+          <span class="text-4xl mb-2">${mood.emoji}</span>
+          <span class="font-medium" style="color: ${config.text_color || defaultConfig.text_color};">${mood.label}</span>
+        </button>
+      `).join('');
+
+      document.querySelectorAll('.mood-option').forEach(btn => {
+        btn.addEventListener('click', function() {
+          document.querySelectorAll('.mood-option').forEach(b => {
+            b.style.borderColor = `${config.text_color || defaultConfig.text_color}22`;
+            b.style.background = 'white';
+            b.style.transform = 'scale(1)';
+            b.classList.remove('selected');
+          });
+          this.style.borderColor = config.accent_color || defaultConfig.accent_color;
+          this.style.background = `linear-gradient(135deg, ${config.accent_color || defaultConfig.accent_color}22 0%, ${config.accent_color || defaultConfig.accent_color}11 100%)`;
+          this.style.transform = 'scale(1.1)';
+          this.classList.add('selected');
+        });
+      });
+    }
+
+    function renderRecords() {
+      const container = document.getElementById('records-container');
+      const emptyState = document.getElementById('empty-state');
+      const paginationContainer = document.getElementById('pagination-container');
+      const baseSize = config.font_size || defaultConfig.font_size;
+
+      if (records.length === 0) {
+        container.innerHTML = '';
+        emptyState.classList.remove('hidden');
+        if (paginationContainer) paginationContainer.classList.add('hidden');
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+
+      const sortedRecords = [...records]
+        .filter(record => isAdminMode || !record.isHidden)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      const totalPages = Math.ceil(sortedRecords.length / recordsPerPage);
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+
+      const startIndex = (currentPage - 1) * recordsPerPage;
+      const endIndex = startIndex + recordsPerPage;
+      const pageRecords = sortedRecords.slice(startIndex, endIndex);
+
+      container.innerHTML = pageRecords.map(record => {
+        const comments = record.comments ? JSON.parse(record.comments) : [];
+        
+        return `
+        <div class="p-6 rounded-3xl shadow-xl hover:shadow-2xl transition-all hover:scale-105 fade-in card-gradient" style="border: 3px solid ${config.accent_color || defaultConfig.accent_color}44;">
+          <div class="flex justify-between items-start mb-4">
+            <div class="flex-1">
+              <div class="inline-block px-4 py-1 rounded-full mb-2" style="background: linear-gradient(135deg, ${config.accent_color || defaultConfig.accent_color}33 0%, ${config.accent_color || defaultConfig.accent_color}22 100%);">
+                <span class="font-bold" style="font-size: ${baseSize * 0.9}px; color: ${config.accent_color || defaultConfig.accent_color};">${record.className}</span>
+              </div>
+              <div class="font-bold" style="font-size: ${baseSize * 1.2}px; color: ${config.text_color || defaultConfig.text_color};">${record.studentName}</div>
+            </div>
+            <div class="text-5xl float-animation">${record.mood}</div>
+          </div>
+          
+          <div class="mb-4 p-4 rounded-2xl" style="background: linear-gradient(135deg, ${config.primary_button_color || defaultConfig.primary_button_color}22 0%, ${config.primary_button_color || defaultConfig.primary_button_color}11 100%);">
+            <div class="font-bold mb-2 flex items-center gap-2" style="font-size: ${baseSize * 1.1}px; color: ${config.primary_button_color || defaultConfig.primary_button_color};">
+              <span>📖</span>
+              <span>${record.bookTitle}</span>
+            </div>
+            <div class="font-medium" style="font-size: ${baseSize * 0.9}px; color: ${config.text_color || defaultConfig.text_color}99;">📄 第 ${record.startPage} - ${record.endPage} 頁</div>
+          </div>
+          
+          <p class="mb-4 p-4 rounded-2xl" style="font-size: ${baseSize * 0.95}px; color: ${config.text_color || defaultConfig.text_color}; line-height: 1.6; background: rgba(255, 255, 255, 0.5);">${record.reflection}</p>
+          
+          <div class="flex items-center gap-4 pb-4 mb-4" style="border-bottom: 2px solid ${config.accent_color || defaultConfig.accent_color}22;">
+            ${globalLikesEnabled ? `
+            <button class="like-btn flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all hover:scale-110 shadow-md" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); color: white; font-size: ${baseSize * 0.95}px;" data-id="${record.__backendId}">
+              ❤️ <span>${record.likesCount || 0}</span>
+            </button>
+            ` : `<span class="px-3 py-1 rounded-lg" style="font-size: ${baseSize * 0.85}px; color: ${config.text_color || defaultConfig.text_color}66; background: ${config.text_color || defaultConfig.text_color}11;">按讚已關閉</span>`}
+            
+            ${globalCommentsEnabled ? `
+            <button class="comment-toggle-btn flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all hover:scale-110 shadow-md" style="background: linear-gradient(135deg, ${config.primary_button_color || defaultConfig.primary_button_color} 0%, ${adjustColor(config.primary_button_color || defaultConfig.primary_button_color, -20)} 100%); color: white; font-size: ${baseSize * 0.95}px;" data-id="${record.__backendId}">
+              💬 <span>${comments.length}</span>
+            </button>
+            ` : `<span class="px-3 py-1 rounded-lg" style="font-size: ${baseSize * 0.85}px; color: ${config.text_color || defaultConfig.text_color}66; background: ${config.text_color || defaultConfig.text_color}11;">留言已關閉</span>`}
+          </div>
+          
+          ${globalCommentsEnabled ? `
+          <div class="comment-section hidden mt-4" id="comments-${record.__backendId}">
+            <div class="space-y-3 mb-4 max-h-64 overflow-y-auto p-3 rounded-2xl" style="background: rgba(255, 255, 255, 0.5);">
+              ${comments.map(c => `
+                <div class="p-3 rounded-xl shadow-sm" style="background: linear-gradient(135deg, white 0%, ${config.background_color || defaultConfig.background_color}11 100%);">
+                  <div class="font-bold mb-1" style="font-size: ${baseSize * 0.9}px; color: ${config.accent_color || defaultConfig.accent_color};">👤 ${c.name}</div>
+                  <div style="font-size: ${baseSize * 0.85}px; color: ${config.text_color || defaultConfig.text_color};">${c.text}</div>
+                </div>
+              `).join('')}
+              ${comments.length === 0 ? `<div class="text-center py-4" style="font-size: ${baseSize * 0.9}px; color: ${config.text_color || defaultConfig.text_color}66;">💭 還沒有留言，來搶第一個吧！</div>` : ''}
+            </div>
+            <div class="flex gap-2">
+              <input type="text" placeholder="👤 你的名字" class="comment-name-input flex-1 px-4 py-2 border-2 rounded-xl" style="font-size: ${baseSize * 0.9}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+              <input type="text" placeholder="��� 留言內容" class="comment-text-input flex-2 px-4 py-2 border-2 rounded-xl" style="font-size: ${baseSize * 0.9}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+              <button class="add-comment-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md" style="background: linear-gradient(135deg, ${config.primary_button_color || defaultConfig.primary_button_color} 0%, ${adjustColor(config.primary_button_color || defaultConfig.primary_button_color, -20)} 100%); color: white; font-size: ${baseSize * 0.9}px;" data-id="${record.__backendId}">送出</button>
+            </div>
+          </div>
+          ` : ''}
+          
+          ${isAdminMode ? `
+          <div class="mt-4 flex justify-end gap-2">
+            <button class="hide-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md" style="background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%); color: white; font-size: ${baseSize * 0.85}px;" data-id="${record.__backendId}">
+              ${record.isHidden ? '👁️ 顯示' : '🙈 隱藏'}
+            </button>
+            <button class="delete-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md" style="background: linear-gradient(135deg, #f87171 0%, #ef4444 100%); color: white; font-size: ${baseSize * 0.85}px;" data-id="${record.__backendId}">🗑️ 刪除</button>
+          </div>
+          ` : ''}
+          
+          ${record.isHidden && isAdminMode ? `<div class="mt-3 text-center px-3 py-2 rounded-xl font-bold" style="background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%); color: white; font-size: ${baseSize * 0.85}px;">🙈 已隱藏</div>` : ''}
+        </div>
+      `}).join('');
+
+      renderPagination(totalPages);
+      attachRecordEventListeners();
+    }
+
+    function renderPagination(totalPages) {
+      const paginationContainer = document.getElementById('pagination-container');
+      if (!paginationContainer) return;
+      const baseSize = config.font_size || defaultConfig.font_size;
+
+      if (totalPages <= 1) {
+        paginationContainer.classList.add('hidden');
+        return;
+      }
+
+      paginationContainer.classList.remove('hidden');
+
+      let paginationHTML = '';
+
+      // 上一頁按鈕
+      paginationHTML += `
+        <button class="pagination-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}" 
+          data-page="${currentPage - 1}" 
+          ${currentPage === 1 ? 'disabled' : ''}
+          style="background: linear-gradient(135deg, white 0%, rgba(255, 255, 255, 0.9) 100%); color: ${config.text_color || defaultConfig.text_color}; font-size: ${baseSize * 0.9}px;">
+          ← 上一頁
+        </button>
+      `;
+
+      // 頁碼按鈕
+      const maxVisiblePages = 5;
+      let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+      let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+      if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+      }
+
+      if (startPage > 1) {
+        paginationHTML += `
+          <button class="pagination-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md" 
+            data-page="1"
+            style="background: linear-gradient(135deg, white 0%, rgba(255, 255, 255, 0.9) 100%); color: ${config.text_color || defaultConfig.text_color}; font-size: ${baseSize * 0.9}px;">
+            1
+          </button>
+        `;
+        if (startPage > 2) {
+          paginationHTML += `<span style="color: white; font-size: ${baseSize * 1.2}px;">...</span>`;
+        }
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        const isActive = i === currentPage;
+        paginationHTML += `
+          <button class="pagination-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md" 
+            data-page="${i}"
+            style="background: linear-gradient(135deg, ${isActive ? config.primary_button_color || defaultConfig.primary_button_color : 'white'} 0%, ${isActive ? adjustColor(config.primary_button_color || defaultConfig.primary_button_color, -20) : 'rgba(255, 255, 255, 0.9)'} 100%); color: ${isActive ? 'white' : config.text_color || defaultConfig.text_color}; font-size: ${baseSize * 0.9}px; ${isActive ? 'transform: scale(1.1);' : ''}">
+            ${i}
+          </button>
+        `;
+      }
+
+      if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+          paginationHTML += `<span style="color: white; font-size: ${baseSize * 1.2}px;">...</span>`;
+        }
+        paginationHTML += `
+          <button class="pagination-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md" 
+            data-page="${totalPages}"
+            style="background: linear-gradient(135deg, white 0%, rgba(255, 255, 255, 0.9) 100%); color: ${config.text_color || defaultConfig.text_color}; font-size: ${baseSize * 0.9}px;">
+            ${totalPages}
+          </button>
+        `;
+      }
+
+      // 下一頁按鈕
+      paginationHTML += `
+        <button class="pagination-btn px-4 py-2 rounded-xl font-bold transition-all hover:scale-105 shadow-md ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}" 
+          data-page="${currentPage + 1}" 
+          ${currentPage === totalPages ? 'disabled' : ''}
+          style="background: linear-gradient(135deg, white 0%, rgba(255, 255, 255, 0.9) 100%); color: ${config.text_color || defaultConfig.text_color}; font-size: ${baseSize * 0.9}px;">
+          下一頁 →
+        </button>
+      `;
+
+      paginationContainer.innerHTML = paginationHTML;
+
+      // 綁定分頁按鈕事件
+      document.querySelectorAll('.pagination-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+          if (this.disabled) return;
+          const page = parseInt(this.getAttribute('data-page'));
+          if (page >= 1 && page <= totalPages) {
+            currentPage = page;
+            renderRecords();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        });
+      });
+    }
+
+    function attachRecordEventListeners() {
+      document.querySelectorAll('.like-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const id = this.getAttribute('data-id');
+          const record = records.find(r => r.__backendId === id);
+          if (record) {
+            this.disabled = true;
+            const updatedRecord = {
+              ...record,
+              likesCount: (record.likesCount || 0) + 1
+            };
+            const result = await window.dataSdk.update(updatedRecord);
+            if (!result.isOk) {
+              this.disabled = false;
+              showToast('❌ 按讚失敗，請重試');
+            }
+          }
+        });
+      });
+
+      document.querySelectorAll('.comment-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const id = this.getAttribute('data-id');
+          const commentSection = document.getElementById(`comments-${id}`);
+          if (commentSection) {
+            commentSection.classList.toggle('hidden');
+          }
+        });
+      });
+
+      document.querySelectorAll('.add-comment-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const id = this.getAttribute('data-id');
+          const record = records.find(r => r.__backendId === id);
+          if (record) {
+            const commentSection = document.getElementById(`comments-${id}`);
+            const nameInput = commentSection.querySelector('.comment-name-input');
+            const textInput = commentSection.querySelector('.comment-text-input');
+            
+            const name = nameInput.value.trim();
+            const text = textInput.value.trim();
+            
+            if (!name || !text) {
+              showToast('⚠️ 請填寫名字和留言內容');
+              return;
+            }
+            
+            this.disabled = true;
+            this.textContent = '送出中...';
+            
+            const comments = record.comments ? JSON.parse(record.comments) : [];
+            comments.push({ name, text, time: new Date().toISOString() });
+            
+            const updatedRecord = {
+              ...record,
+              comments: JSON.stringify(comments)
+            };
+            
+            const result = await window.dataSdk.update(updatedRecord);
+            
+            this.disabled = false;
+            this.textContent = '送出';
+            
+            if (result.isOk) {
+              nameInput.value = '';
+              textInput.value = '';
+              showToast('✅ 留言成功！');
+            } else {
+              showToast('❌ 留言失敗，請重試');
+            }
+          }
+        });
+      });
+
+      document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const id = this.getAttribute('data-id');
+          const record = records.find(r => r.__backendId === id);
+          if (record) {
+            this.disabled = true;
+            this.textContent = '刪除中...';
+            const result = await window.dataSdk.delete(record);
+            if (!result.isOk) {
+              this.disabled = false;
+              this.textContent = '🗑️ 刪除';
+              showToast('❌ 刪除失敗，請重試');
+            }
+          }
+        });
+      });
+
+      document.querySelectorAll('.hide-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const id = this.getAttribute('data-id');
+          const record = records.find(r => r.__backendId === id);
+          if (record) {
+            this.disabled = true;
+            const originalText = this.textContent;
+            this.textContent = '處理中...';
+            
+            const updatedRecord = {
+              ...record,
+              isHidden: !record.isHidden
+            };
+            
+            const result = await window.dataSdk.update(updatedRecord);
+            
+            if (!result.isOk) {
+              this.disabled = false;
+              this.textContent = originalText;
+              showToast('❌ 操作失敗，請重試');
+            }
+          }
+        });
+      });
+    }
+
+    function attachEventListeners() {
+      const addButton = document.getElementById('add-button');
+      const formContainer = document.getElementById('form-container');
+      const cancelButton = document.getElementById('cancel-button');
+      const form = document.getElementById('reading-form');
+      const adminToggle = document.getElementById('admin-toggle');
+      const globalLikesToggle = document.getElementById('global-likes-toggle');
+      const globalCommentsToggle = document.getElementById('global-comments-toggle');
+
+      if (globalLikesToggle) {
+        globalLikesToggle.addEventListener('change', function() {
+          globalLikesEnabled = this.checked;
+          renderRecords();
+          showToast(globalLikesEnabled ? '✅ ���������按讚功能' : '❌ 已關閉按讚功能');
+        });
+      }
+
+      if (globalCommentsToggle) {
+        globalCommentsToggle.addEventListener('change', function() {
+          globalCommentsEnabled = this.checked;
+          renderRecords();
+          showToast(globalCommentsEnabled ? '✅ 已開啟留言功能' : '❌ 已關閉留言功能');
+        });
+      }
+
+      adminToggle.addEventListener('click', () => {
+        if (isAdminMode) {
+          isAdminMode = false;
+          showToast('👋 已離開管理模式');
+          render();
+        } else {
+          showPasswordPrompt();
+        }
+      });
+
+      addButton.addEventListener('click', () => {
+        if (records.length >= 999) {
+          showToast('⚠️ 已達到 999 筆記錄上限');
+          return;
+        }
+        formContainer.classList.remove('hidden');
+        addButton.style.display = 'none';
+        form.reset();
+        document.querySelectorAll('.mood-option').forEach(b => {
+          b.style.borderColor = `${config.text_color || defaultConfig.text_color}22`;
+          b.style.background = 'white';
+          b.style.transform = 'scale(1)';
+          b.classList.remove('selected');
+        });
+      });
+
+      cancelButton.addEventListener('click', () => {
+        formContainer.classList.add('hidden');
+        addButton.style.display = 'inline-block';
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const selectedMood = document.querySelector('.mood-option.selected');
+        if (!selectedMood) {
+          showToast('⚠️ 請選擇你的心情');
+          return;
+        }
+
+        if (records.length >= 999) {
+          showToast('⚠️ 已達到 999 筆記錄上限');
+          return;
+        }
+
+        const submitButton = document.getElementById('submit-button');
+        submitButton.disabled = true;
+        submitButton.textContent = '送出中...';
+
+        const newRecord = {
+          id: Date.now().toString(),
+          className: document.getElementById('class-name').value,
+          studentName: document.getElementById('student-name').value,
+          bookTitle: document.getElementById('book-title').value,
+          startPage: parseInt(document.getElementById('start-page').value),
+          endPage: parseInt(document.getElementById('end-page').value),
+          reflection: document.getElementById('reflection').value,
+          mood: selectedMood.getAttribute('data-mood'),
+          createdAt: new Date().toISOString(),
+          isHidden: false,
+          likesCount: 0,
+          comments: JSON.stringify([])
+        };
+
+        const result = await window.dataSdk.create(newRecord);
+        
+        submitButton.disabled = false;
+        submitButton.textContent = '🚀 送出打卡';
+
+        if (result.isOk) {
+          formContainer.classList.add('hidden');
+          addButton.style.display = 'inline-block';
+          form.reset();
+          showToast('🎉 打卡成功��');
+        } else {
+          showToast('❌ 送出失敗，請重試');
+        }
+      });
+    }
+
+    function showPasswordPrompt() {
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 flex items-center justify-center z-50';
+      overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+      overlay.style.backdropFilter = 'blur(5px)';
+      
+      overlay.innerHTML = `
+        <div class="p-8 rounded-3xl shadow-2xl max-w-sm w-full mx-4 card-gradient" style="border: 3px solid ${config.accent_color || defaultConfig.accent_color};">
+          <h3 class="font-bold mb-6 text-center" style="font-size: ${baseSize * 1.5}px; color: ${config.primary_button_color || defaultConfig.primary_button_color};">🔐 管理者登入</h3>
+          <input type="password" id="admin-password-input" placeholder="請輸入管理者密碼" class="w-full px-4 py-3 border-2 rounded-xl mb-6 transition-all focus:scale-105" style="font-size: ${baseSize}px; border-color: ${config.accent_color || defaultConfig.accent_color};">
+          <div class="flex gap-3">
+            <button id="password-submit" class="flex-1 px-6 py-3 rounded-xl font-bold transition-all hover:scale-105 shadow-lg" style="font-size: ${baseSize}px; background: linear-gradient(135deg, ${config.primary_button_color || defaultConfig.primary_button_color} 0%, ${adjustColor(config.primary_button_color || defaultConfig.primary_button_color, -20)} 100%); color: white;">✓ 確認</button>
+            <button id="password-cancel" class="flex-1 px-6 py-3 rounded-xl font-bold border-2 transition-all hover:scale-105" style="font-size: ${baseSize}px; border-color: ${config.text_color || defaultConfig.text_color}33; color: ${config.text_color || defaultConfig.text_color};">✗ 取消</button>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(overlay);
+      
+      const passwordInput = document.getElementById('admin-password-input');
+      const submitBtn = document.getElementById('password-submit');
+      const cancelBtn = document.getElementById('password-cancel');
+      
+      passwordInput.focus();
+      
+      submitBtn.addEventListener('click', () => {
+        const enteredPassword = passwordInput.value;
+        const correctPassword = config.admin_password || defaultConfig.admin_password;
+        
+        if (enteredPassword === correctPassword) {
+          isAdminMode = true;
+          overlay.remove();
+          showToast('🎉 管理者登入成功');
+          render();
+        } else {
+          showToast('❌ 密碼錯誤，請重試');
+          passwordInput.value = '';
+          passwordInput.focus();
+        }
+      });
+      
+      cancelBtn.addEventListener('click', () => {
+        overlay.remove();
+      });
+      
+      passwordInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          submitBtn.click();
+        }
+      });
+      
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.remove();
+        }
+      });
+    }
+
+    function showToast(message) {
+      const toast = document.createElement('div');
+      toast.className = 'fixed top-4 right-4 px-6 py-4 rounded-2xl shadow-2xl z-50 font-bold';
+      toast.style.background = 'linear-gradient(135deg, white 0%, rgba(255, 255, 255, 0.95) 100%)';
+      toast.style.color = config.text_color || defaultConfig.text_color;
+      toast.style.fontSize = `${config.font_size || defaultConfig.font_size}px`;
+      toast.style.border = `3px solid ${config.accent_color || defaultConfig.accent_color}`;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    const dataHandler = {
+      onDataChanged(data) {
+        records = data;
+        const recordsContainer = document.getElementById('records-container');
+        const emptyState = document.getElementById('empty-state');
+        
+        if (recordsContainer && emptyState) {
+          renderRecords();
+        }
+      }
+    };
+
+    async function onConfigChange(newConfig) {
+      config = { ...defaultConfig, ...newConfig };
+      render();
+    }
+
+    async function initApp() {
+      if (window.dataSdk) {
+        const result = await window.dataSdk.init(dataHandler);
+        if (!result.isOk) {
+          console.error('Failed to initialize data SDK');
+        }
+      }
+
+      if (window.elementSdk) {
+        window.elementSdk.init({
+          defaultConfig,
+          onConfigChange,
+          mapToCapabilities: (cfg) => ({
+            recolorables: [
+              {
+                get: () => cfg.background_color || defaultConfig.background_color,
+                set: (value) => {
+                  config.background_color = value;
+                  window.elementSdk.setConfig({ background_color: value });
+                }
+              },
+              {
+                get: () => cfg.card_color || defaultConfig.card_color,
+                set: (value) => {
+                  config.card_color = value;
+                  window.elementSdk.setConfig({ card_color: value });
+                }
+              },
+              {
+                get: () => cfg.text_color || defaultConfig.text_color,
+                set: (value) => {
+                  config.text_color = value;
+                  window.elementSdk.setConfig({ text_color: value });
+                }
+              },
+              {
+                get: () => cfg.primary_button_color || defaultConfig.primary_button_color,
+                set: (value) => {
+                  config.primary_button_color = value;
+                  window.elementSdk.setConfig({ primary_button_color: value });
+                }
+              },
+              {
+                get: () => cfg.accent_color || defaultConfig.accent_color,
+                set: (value) => {
+                  config.accent_color = value;
+                  window.elementSdk.setConfig({ accent_color: value });
+                }
+              }
+            ],
+            borderables: [],
+            fontEditable: {
+              get: () => cfg.font_family || defaultConfig.font_family,
+              set: (value) => {
+                config.font_family = value;
+                window.elementSdk.setConfig({ font_family: value });
+              }
+            },
+            fontSizeable: {
+              get: () => cfg.font_size || defaultConfig.font_size,
+              set: (value) => {
+                config.font_size = value;
+                window.elementSdk.setConfig({ font_size: value });
+              }
+            }
+          }),
+          mapToEditPanelValues: (cfg) => new Map([
+            ['wall_title', cfg.wall_title || defaultConfig.wall_title],
+            ['subtitle_text', cfg.subtitle_text || defaultConfig.subtitle_text],
+            ['button_text', cfg.button_text || defaultConfig.button_text],
+            ['class_label', cfg.class_label || defaultConfig.class_label],
+            ['name_label', cfg.name_label || defaultConfig.name_label],
+            ['book_label', cfg.book_label || defaultConfig.book_label],
+            ['pages_label', cfg.pages_label || defaultConfig.pages_label],
+            ['reflection_label', cfg.reflection_label || defaultConfig.reflection_label],
+            ['mood_label', cfg.mood_label || defaultConfig.mood_label],
+            ['admin_password', cfg.admin_password || defaultConfig.admin_password]
+          ])
+        });
+      }
+
+      render();
+    }
+
+    initApp();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9a503053104f827c',t:'MTc2NDIzMTQ0Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
